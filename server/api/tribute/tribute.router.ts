@@ -1,45 +1,96 @@
-import { protectedProcedure, router } from "../../_core/trpc";
-import { createTributePageValidator } from "./tribute.validators";
-import { createTributePageWithRetry } from "./tribute.service";
-import { getTributePageBySlug, getTributePagesByUserId } from "../../db";
 import { z } from "zod";
+import {
+  router,
+  protectedProcedure,
+  adminProcedure,
+} from "../../_core/trpc";
+import {
+  createTributePageSchema,
+  updateTributePageSchema,
+} from "./tribute.validators";
+import {
+  createTributePage,
+  getTributePageBySlug,
+  getTributePagesByUserId,
+  getTributePageById,
+  updateTributePage,
+  deleteTributePage,
+  adminDeleteTributePage,
+  getAllTributePages, // Import this
+} from "../../db";
 
 export const tributeRouter = router({
-  /**
-   * Creates a new tribute page for the authenticated user.
-   */
   create: protectedProcedure
-    .input(createTributePageValidator)
+    .input(createTributePageSchema)
     .mutation(async ({ ctx, input }) => {
-      const newPage = await createTributePageWithRetry(ctx.user.id, input);
-      return newPage;
+      const { user } = ctx;
+      const page = await createTributePage({ ...input, userId: user.id });
+      return page;
     }),
 
-  /**
-   * Gets all tribute pages belonging to the authenticated user.
-   */
   myPages: protectedProcedure.query(async ({ ctx }) => {
-    const pages = await getTributePagesByUserId(ctx.user.id);
+    const { user } = ctx;
+    const pages = await getTributePagesByUserId(user.id);
     return pages;
   }),
 
-  /**
-   * Gets a single tribute page by its public slug.
-   */
-  getBySlug: protectedProcedure // Or `publicProcedure` if pages can be viewed by anyone
+  byId: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const page = await getTributePageById(input.id);
+      return page;
+    }),
+
+  bySlug: protectedProcedure
     .input(z.object({ slug: z.string() }))
     .query(async ({ input }) => {
       const page = await getTributePageBySlug(input.slug);
-      if (!page) {
-        // Handle not found case
-        return null;
-      }
-      // Here you might want to transform the data, e.g., parsing photoUrls
-      return {
-        ...page,
-        photoUrls: JSON.parse(page.photoUrls || '[]'),
-      };
+      return page;
     }),
 
-  // NOTE: Other routes like `update`, `delete`, `uploadPhoto` would go here
+  update: protectedProcedure
+    .input(updateTributePageSchema)
+    .mutation(async ({ ctx, input }) => {
+      const { user } = ctx;
+      const { id, ...data } = input;
+
+      // Allow update if user is admin
+      if (user.role !== 'admin') {
+        const page = await getTributePageById(id);
+        if (page?.userId !== user.id) {
+          throw new Error("Unauthorized");
+        }
+      }
+
+      const updatedPage = await updateTributePage(id, data);
+      return updatedPage;
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user } = ctx;
+      await deleteTributePage(input.id, user.id);
+      return { success: true };
+    }),
+
+  // Admin routes
+  adminGetAll: adminProcedure.query(async () => {
+    const pages = await getAllTributePages();
+    return pages;
+  }),
+
+  adminDelete: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await adminDeleteTributePage(input.id);
+      return { success: true };
+    }),
+
+  adminPromote: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const updatedPage = await updateTributePage(input.id, { planType: "premium" });
+      return updatedPage;
+    }),
 });

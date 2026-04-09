@@ -1,17 +1,19 @@
+
 import { Router, Request, Response } from "express";
 import { generateAdminToken, verifyAdminPassword, verifyAdminToken } from "./adminAuth";
 
 const router = Router();
 
 // POST /api/admin/login - Authenticate with password
-router.post("/login", (req: Request, res: Response) => {
+router.post("/login", async (req: Request, res: Response) => {
   const { password } = req.body;
 
   if (!password) {
     return res.status(400).json({ error: "Password required" });
   }
 
-  if (!verifyAdminPassword(password)) {
+  const isValid = await verifyAdminPassword(password);
+  if (!isValid) {
     return res.status(401).json({ error: "Invalid password" });
   }
 

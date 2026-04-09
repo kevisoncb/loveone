@@ -1,7 +1,7 @@
 import { router } from "../_core/trpc";
 import { authRouter } from "./auth/auth.router";
 import { tributeRouter } from "./tribute/tribute.router";
-// Import other routers like paymentRouter here
+import { paymentRouter } from "./payment/payment.router";
 
 /**
  * This is the primary router for your entire server.
@@ -11,7 +11,7 @@ import { tributeRouter } from "./tribute/tribute.router";
 export const appRouter = router({
   auth: authRouter,
   tribute: tributeRouter,
-  // payment: paymentRouter,
+  payment: paymentRouter,
 });
 
 // Export type signature to be used in the client.

@@ -105,6 +105,12 @@ export async function getTributePageBySlug(slug: string) {
   return result.length > 0 ? result[0] : null;
 }
 
+export async function getAllTributePages() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.select().from(tributePages);
+}
+
 export async function getTributePagesByUserId(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -131,11 +137,23 @@ export async function deleteTributePage(id: number, userId: number) {
   await db.delete(tributePages).where(and(eq(tributePages.id, id), eq(tributePages.userId, userId)));
 }
 
+export async function adminDeleteTributePage(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(tributePages).where(eq(tributePages.id, id));
+}
+
 // Payment helpers
 export async function createPayment(data: InsertPayment) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.insert(payments).values(data);
+}
+
+export async function getAllPayments() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.select().from(payments);
 }
 
 export async function updatePaymentByStripeId(stripePaymentIntentId: string, data: Partial<InsertPayment>) {
