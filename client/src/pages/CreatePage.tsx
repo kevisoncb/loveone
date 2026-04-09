@@ -9,6 +9,8 @@ import { getLoginUrl } from "@/const";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+
 const PRODUCTS = {
   essential: { features: { maxPhotos: 3 } },
   premium: { features: { maxPhotos: 5 } },
@@ -25,6 +27,7 @@ export default function CreatePage() {
   const [musicUrl, setMusicUrl] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [showUpsellModal, setShowUpsellModal] = useState(false);
 
   const uploadMutation = trpc.tribute.uploadPhoto.useMutation();
   const createMutation = trpc.tribute.create.useMutation({
@@ -60,6 +63,10 @@ export default function CreatePage() {
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
+    if (selectedPlan === "essential" && photos.length + files.length > maxPhotos) {
+      setShowUpsellModal(true);
+      return;
+    }
     if (photos.length + files.length > maxPhotos) {
       toast.error(`Você pode adicionar no máximo ${maxPhotos} fotos no plano ${selectedPlan === "premium" ? "Premium" : "Essencial"}`);
       return;
@@ -88,6 +95,12 @@ export default function CreatePage() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUpgrade = () => {
+    setSelectedPlan("premium");
+    setShowUpsellModal(false);
+    toast.success("Plano atualizado para Premium! Agora você pode adicionar mais fotos.");
   };
 
   const removePhoto = (index: number) => {
@@ -337,6 +350,25 @@ export default function CreatePage() {
             <span>💳 Cartão de crédito</span>
           </div>
         </div>
+
+        <Dialog open={showUpsellModal} onOpenChange={setShowUpsellModal}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Crown className="w-5 h-5 text-yellow-500" />
+                Faça upgrade para o Premium!
+              </DialogTitle>
+              <DialogDescription className="pt-2">
+                O plano Essencial permite até 3 fotos. Para adicionar mais fotos e ter acesso a recursos exclusivos como o player estilo Spotify e a chuva de corações, faça o upgrade para o plano Premium.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-3 pt-4">
+              <Button variant="outline" onClick={() => setShowUpsellModal(false)}>Agora não</Button>
+              <Button onClick={handleUpgrade} className="bg-primary hover:bg-primary/90 text-white">Fazer Upgrade</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   );

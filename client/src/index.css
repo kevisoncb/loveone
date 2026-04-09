@@ -107,6 +107,18 @@
 }
 
 @layer components {
+  .dashboard-card {
+    @apply bg-card rounded-2xl border border-border overflow-hidden hover:shadow-lg transition-all group;
+  }
+
+  .dashboard-card-action-btn {
+    @apply flex-1 rounded-full text-xs;
+  }
+
+  .dashboard-card-icon-btn {
+    @apply rounded-full text-xs;
+  }
+
   /**
    * Custom container utility that centers content and adds responsive padding.
    *

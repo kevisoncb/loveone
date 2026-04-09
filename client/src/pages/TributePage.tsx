@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc";
 import ReactPlayer from "react-player";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Helmet } from "react-helmet-async";
 
 interface TimeLeft {
   years: number;
@@ -189,6 +190,9 @@ export default function TributePage() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-rose-900 to-pink-950 flex items-center justify-center">
+        <Helmet>
+          <title>Carregando...</title>
+        </Helmet>
         <Heart className="w-12 h-12 text-white/50 fill-white/50 animate-pulse" />
       </div>
     );
@@ -197,6 +201,10 @@ export default function TributePage() {
   if (!data) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-rose-900 to-pink-950 flex items-center justify-center text-center p-6">
+        <Helmet>
+          <title>Página não encontrada</title>
+          <meta name="description" content="Esta página de homenagem não existe ou foi removida." />
+        </Helmet>
         <div>
           <Heart className="w-16 h-16 text-white/30 fill-white/30 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: "Cormorant Garamond, serif" }}>Página não encontrada</h1>
@@ -209,6 +217,10 @@ export default function TributePage() {
   if (data.isExpired) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-rose-900 to-pink-950 flex items-center justify-center text-center p-6">
+        <Helmet>
+          <title>Página expirada</title>
+          <meta name="description" content="Esta página de homenagem expirou. Entre em contato com o criador para renovação." />
+        </Helmet>
         <div>
           <Heart className="w-16 h-16 text-white/30 fill-white/30 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-white mb-2" style={{ fontFamily: "Cormorant Garamond, serif" }}>Página expirada</h1>
@@ -221,10 +233,13 @@ export default function TributePage() {
   const photos = JSON.parse(data.photoUrls || "[]") as string[];
   const isPremium = data.planType === "premium";
   const shareUrl = `${window.location.origin}/p/${slug}`;
+  const title = `${data.partner1Name} & ${data.partner2Name} - Uma homenagem no Love365`;
+  const description = `Uma página para celebrar o nosso amor. Juntos desde ${new Date(data.relationshipStartDate).toLocaleDateString("pt-BR")}.`;
+  const imageUrl = photos[0] || "/default-og-image.png";
 
   const handleShare = async () => {
     if (navigator.share) {
-      try { await navigator.share({ title: `${data.partner1Name} & ${data.partner2Name}`, text: "Nossa página de homenagem no Love365", url: shareUrl }); }
+      try { await navigator.share({ title, text: description, url: shareUrl }); }
       catch {}
     } else {
       await navigator.clipboard.writeText(shareUrl);
@@ -234,6 +249,19 @@ export default function TributePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-rose-900 via-pink-950 to-rose-900 relative overflow-hidden">
+      <Helmet>
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+        <meta property="og:image" content={imageUrl} />
+        <meta property="og:url" content={shareUrl} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={title} />
+        <meta name="twitter:description" content={description} />
+        <meta name="twitter:image" content={imageUrl} />
+      </Helmet>
+      
       {/* Background */}
       <div className="fixed inset-0 z-0">
         {photos.length > 0 ? <PhotoSlideshow photos={photos} /> : <div className="w-full h-full bg-gradient-to-b from-rose-900 to-pink-950" />}

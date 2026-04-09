@@ -1,6 +1,5 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -12,6 +11,9 @@ import TributePage from "./pages/TributePage";
 import QRCodePage from "./pages/QRCodePage";
 import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
+import { TermsPage } from "./pages/TermsPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
 function Router() {
   return (
@@ -24,8 +26,9 @@ function Router() {
       <Route path={"/qr/:slug"} component={QRCodePage} />
       <Route path={"/admin"} component={AdminLogin} />
       <Route path={"/admin/dashboard"} component={AdminDashboard} />
-      <Route path={"/404"} component={NotFound} />
-      <Route component={NotFound} />
+      <Route path={"/terms"} component={TermsPage} />
+      <Route path={"/privacy"} component={PrivacyPage} />
+      <Route component={NotFoundPage} />
     </Switch>
   );
 }

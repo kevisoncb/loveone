@@ -391,8 +391,9 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-6 text-sm text-background/60" style={{ fontFamily: "Inter, sans-serif" }}>
               <a href="/terms" className="hover:text-background transition-colors">Termos de Uso</a>
-              <a href="/privacy" className="hover:text-background transition-colors">Privacidade</a>
+              <a href="/privacy" className="hover:text-background transition-colors">Política de Privacidade</a>
               <a href="mailto:contato@love365.com.br" className="hover:text-background transition-colors">Contato</a>
+              {isAuthenticated && <a href="/dashboard" className="hover:text-background transition-colors">Meu Painel</a>}
             </div>
             <p className="text-sm text-background/40" style={{ fontFamily: "Inter, sans-serif" }}>
               © {new Date().getFullYear()} Love365. Feito com amor ♥
