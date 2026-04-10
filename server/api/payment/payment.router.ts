@@ -1,11 +1,17 @@
 
-import { adminProcedure, router } from "../../_core/trpc";
-import { refundPaymentSchema } from "./payment.validators";
-import { refundPayment } from "./payment.service";
+import { adminProcedure, router, publicProcedure } from "../../_core/trpc";
+import { refundPaymentSchema, createCheckoutSessionSchema } from "./payment.validators";
+import { refundPayment, createCheckoutSession } from "./payment.service";
 import { getAllPayments, getAllTributePages } from "../../db";
 import { Payment } from "../../drizzle/schema";
 
 export const paymentRouter = router({
+  createCheckoutSession: publicProcedure
+    .input(createCheckoutSessionSchema)
+    .mutation(async ({ input }) => {
+      const session = await createCheckoutSession(input.plan, input.tributeId);
+      return session;
+    }),
   all: adminProcedure.query(async () => {
     const allPayments = await getAllPayments();
     return allPayments;
