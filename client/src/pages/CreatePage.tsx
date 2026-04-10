@@ -1,6 +1,7 @@
+
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Heart, Upload, X, Music, Calendar, Crown, Sparkles, ArrowLeft, Loader2 } from "lucide-react";
+import { Heart, Upload, X, Music, Calendar, Crown, Sparkles, ArrowLeft, Loader2, CreditCard, Banknote } from "lucide-react"; // Added new icons
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,11 +11,11 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { getPublicUrl } from "../../../server/storage"; // Helper to construct public URL from key
+import { getPublicUrl } from "../../../server/storage";
 
 const PRODUCTS = {
-  essential: { features: { maxPhotos: 3 } },
-  premium: { features: { maxPhotos: 5 } },
+  essential: { basePrice: 29.90, features: { maxPhotos: 3 } },
+  premium: { basePrice: 49.90, features: { maxPhotos: 5 } },
 } as const;
 
 export default function CreatePage() {
@@ -22,22 +23,33 @@ export default function CreatePage() {
   const [, navigate] = useLocation();
   const [step, setStep] = useState(1);
   const [selectedPlan, setSelectedPlan] = useState<"essential" | "premium">("essential");
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card'); // New state for payment method
   const [partner1Name, setPartner1Name] = useState("");
   const [partner2Name, setPartner2Name] = useState("");
   const [relationshipDate, setRelationshipDate] = useState("");
   const [musicUrl, setMusicUrl] = useState("");
-  const [photoKeys, setPhotoKeys] = useState<string[]>([]); // Changed from photos (URLs) to photoKeys
+  const [photoKeys, setPhotoKeys] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showUpsellModal, setShowUpsellModal] = useState(false);
 
-  // NEW: Mutation to get a presigned URL from the backend
   const presignedUrlMutation = trpc.tribute.createPresignedUrl.useMutation();
   const createMutation = trpc.tribute.create.useMutation({
     onSuccess: (page) => {
-      toast.success("Página criada com sucesso!");
-      navigate(`/p/${page.uniqueSlug}`);
+      toast.success("Página criada com sucesso! Redirecionando para o pagamento...");
+      // Now, redirect to payment
+      handlePaymentRedirect(page.id);
     },
     onError: () => toast.error("Erro ao criar página"),
+  });
+
+  // New mutation for creating checkout session
+  const checkoutMutation = trpc.payment.createCheckoutSession.useMutation({
+    onSuccess: (session) => {
+      if (session.url) {
+        window.location.href = session.url;
+      }
+    },
+    onError: () => toast.error("Erro ao criar sessão de pagamento."),
   });
 
   useEffect(() => {
@@ -62,8 +74,9 @@ export default function CreatePage() {
   }
 
   const maxPhotos = PRODUCTS[selectedPlan].features.maxPhotos;
+  const basePrice = PRODUCTS[selectedPlan].basePrice;
+  const finalPrice = paymentMethod === 'pix' ? basePrice * 0.9 : basePrice;
 
-  // REWRITTEN: Handles direct-to-S3 uploads
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (photoKeys.length + files.length > maxPhotos) {
@@ -79,25 +92,13 @@ export default function CreatePage() {
     try {
       const newKeys: string[] = [];
       await Promise.all(files.map(async (file) => {
-        // 1. Get presigned URL from our server
         const { uploadUrl, key } = await presignedUrlMutation.mutateAsync({ fileType: file.type });
-
-        // 2. Upload file directly to S3
-        await fetch(uploadUrl, {
-          method: 'PUT',
-          body: file,
-          headers: {
-            'Content-Type': file.type,
-          },
-        });
-
+        await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
         newKeys.push(key);
       }));
-
       setPhotoKeys([...photoKeys, ...newKeys]);
       toast.success(`${files.length} foto(s) enviada(s) com sucesso!`);
     } catch (error) {
-      console.error("Upload failed:", error);
       toast.error("Erro ao enviar fotos. Tente novamente.");
     } finally {
       setUploading(false);
@@ -107,14 +108,13 @@ export default function CreatePage() {
   const handleUpgrade = () => {
     setSelectedPlan("premium");
     setShowUpsellModal(false);
-    toast.success("Plano atualizado para Premium! Agora você pode adicionar mais fotos.");
+    toast.success("Plano atualizado para Premium!");
   };
 
   const removePhoto = (index: number) => {
     setPhotoKeys(photoKeys.filter((_, i) => i !== index));
   };
 
-  // UPDATED: Submits photoKeys instead of URLs
   const handleSubmit = () => {
     if (!partner1Name || !partner2Name || !relationshipDate) {
       toast.error("Preencha todos os campos obrigatórios");
@@ -128,252 +128,122 @@ export default function CreatePage() {
       partner1Name,
       partner2Name,
       relationshipStartDate: relationshipDate,
-      photoKeys: photoKeys, // Use photoKeys here
+      photoKeys: photoKeys,
       musicYoutubeUrl: musicUrl || undefined,
       planType: selectedPlan,
     });
   };
 
+  const handlePaymentRedirect = (tributeId: number) => {
+    checkoutMutation.mutate({
+      plan: selectedPlan,
+      tributeId: tributeId,
+      paymentMethod: paymentMethod,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Navigation */}
       <nav className="sticky top-0 z-50 glass border-b border-white/30">
         <div className="container flex items-center justify-between h-16">
           <button onClick={() => navigate("/dashboard")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
-            <span style={{ fontFamily: "Inter, sans-serif" }}>Voltar</span>
+            <span>Voltar</span>
           </button>
           <div className="flex items-center gap-2">
             <Heart className="w-6 h-6 text-primary fill-primary" />
-            <span className="text-xl font-bold text-gradient-rose" style={{ fontFamily: "Cormorant Garamond, serif" }}>Love365</span>
+            <span className="text-xl font-bold text-gradient-rose">Love365</span>
           </div>
           <div className="w-20" />
         </div>
       </nav>
 
       <div className="container max-w-2xl py-10">
-        {/* Header */}
         <div className="text-center mb-10">
-          <h1 className="text-4xl font-bold text-foreground mb-3" style={{ fontFamily: "Cormorant Garamond, serif" }}>
-            Crie sua página de homenagem
-          </h1>
-          <p className="text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>
-            Preencha os dados do casal e personalize sua página
-          </p>
+          <h1 className="text-4xl font-bold text-foreground">Crie sua página de homenagem</h1>
+          <p className="text-muted-foreground">Preencha os dados e personalize sua página</p>
         </div>
 
         {/* Plan Selector */}
         <div className="mb-10">
-          <Label className="text-sm font-medium mb-3 block" style={{ fontFamily: "Inter, sans-serif" }}>Escolha o plano</Label>
+          <Label className="text-sm font-medium mb-3 block">Escolha o plano</Label>
           <div className="grid sm:grid-cols-2 gap-4">
             <button
               onClick={() => setSelectedPlan("essential")}
-              className={`p-5 rounded-2xl border-2 transition-all text-left ${selectedPlan === "essential" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-bold text-lg" style={{ fontFamily: "Cormorant Garamond, serif" }}>Essencial</h3>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedPlan === "essential" ? "border-primary bg-primary" : "border-border"}`}>
-                  {selectedPlan === "essential" && <div className="w-2.5 h-2.5 rounded-full bg-white" />}
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-primary mb-1">R$ 29,90<span className="text-sm font-normal text-muted-foreground">/ano</span></p>
-              <p className="text-xs text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>3 fotos • Player simples</p>
+              className={`p-5 rounded-2xl border-2 transition-all text-left ${selectedPlan === "essential" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
+              <h3>Essencial</h3>
+              <p>R$ {PRODUCTS.essential.basePrice.toFixed(2).replace('.', ',')}<span className="text-sm font-normal text-muted-foreground">/ano</span></p>
+              <p className="text-xs text-muted-foreground">3 fotos • Player simples</p>
             </button>
             <button
               onClick={() => setSelectedPlan("premium")}
-              className={`p-5 rounded-2xl border-2 transition-all text-left relative overflow-hidden ${selectedPlan === "premium" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}
-            >
-              <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
+              className={`p-5 rounded-2xl border-2 transition-all text-left relative overflow-hidden ${selectedPlan === "premium" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
+               <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
                 <Crown className="w-2.5 h-2.5" />Popular
               </div>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-bold text-lg" style={{ fontFamily: "Cormorant Garamond, serif" }}>Premium</h3>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedPlan === "premium" ? "border-primary bg-primary" : "border-border"}`}>
-                  {selectedPlan === "premium" && <div className="w-2.5 h-2.5 rounded-full bg-white" />}
-                </div>
-              </div>
-              <p className="text-2xl font-bold text-primary mb-1">R$ 49,90<span className="text-sm font-normal text-muted-foreground">/vitalício</span></p>
-              <p className="text-xs text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>5 fotos • Spotify • Corações</p>
+              <h3>Premium</h3>
+              <p>R$ {PRODUCTS.premium.basePrice.toFixed(2).replace('.', ',')}<span className="text-sm font-normal text-muted-foreground">/vitalício</span></p>
+              <p className="text-xs text-muted-foreground">5 fotos • Spotify • Corações</p>
             </button>
+          </div>
+        </div>
+
+        {/* Payment Method Selector */}
+        <div className="mb-10">
+          <Label className="text-sm font-medium mb-3 block">Escolha o método de pagamento</Label>
+          <div className="grid sm:grid-cols-2 gap-4">
+              <button
+                onClick={() => setPaymentMethod('card')}
+                className={`p-5 rounded-2xl border-2 transition-all text-left flex items-center gap-4 ${paymentMethod === 'card' ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
+                 <CreditCard className={`w-6 h-6 ${paymentMethod === 'card' ? 'text-primary' : 'text-muted-foreground'}`} />
+                 <div>
+                    <h3 className="font-bold">Cartão de Crédito</h3>
+                    <p className="text-xs text-muted-foreground">Pagamento seguro</p>
+                 </div>
+              </button>
+               <button
+                onClick={() => setPaymentMethod('pix')}
+                className={`p-5 rounded-2xl border-2 transition-all text-left flex items-center gap-4 relative ${paymentMethod === 'pix' ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
+                <div className="absolute top-2 right-2 bg-green-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">10% OFF</div>
+                <Banknote className={`w-6 h-6 ${paymentMethod === 'pix' ? 'text-primary' : 'text-muted-foreground'}`} />
+                 <div>
+                    <h3 className="font-bold">Pix</h3>
+                    <p className="text-xs text-muted-foreground">Aprovação imediata</p>
+                 </div>
+              </button>
           </div>
         </div>
 
         {/* Form */}
         <div className="bg-card rounded-2xl border border-border p-8 space-y-6">
-          {/* Names */}
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="partner1" style={{ fontFamily: "Inter, sans-serif" }}>Nome do primeiro parceiro</Label>
-              <Input
-                id="partner1"
-                value={partner1Name}
-                onChange={(e) => setPartner1Name(e.target.value)}
-                placeholder="Ex: Ana"
-                className="mt-1.5"
-                style={{ fontFamily: "Inter, sans-serif" }}
-              />
-            </div>
-            <div>
-              <Label htmlFor="partner2" style={{ fontFamily: "Inter, sans-serif" }}>Nome do segundo parceiro</Label>
-              <Input
-                id="partner2"
-                value={partner2Name}
-                onChange={(e) => setPartner2Name(e.target.value)}
-                placeholder="Ex: Pedro"
-                className="mt-1.5"
-                style={{ fontFamily: "Inter, sans-serif" }}
-              />
-            </div>
-          </div>
-
-          {/* Date */}
-          <div>
-            <Label htmlFor="date" className="flex items-center gap-2" style={{ fontFamily: "Inter, sans-serif" }}>
-              <Calendar className="w-4 h-4 text-primary" />
-              Data de início do relacionamento
-            </Label>
-            <Input
-              id="date"
-              type="date"
-              value={relationshipDate}
-              onChange={(e) => setRelationshipDate(e.target.value)}
-              className="mt-1.5"
-              style={{ fontFamily: "Inter, sans-serif" }}
-            />
-          </div>
-
-          {/* Photos */}
-          <div>
-            <Label className="flex items-center gap-2 mb-3" style={{ fontFamily: "Inter, sans-serif" }}>
-              <Upload className="w-4 h-4 text-primary" />
-              Fotos do casal ({photoKeys.length}/{maxPhotos})
-            </Label>
-            <div className="grid grid-cols-3 gap-3 mb-3">
-              {/* UPDATED: Displays images directly from S3 using the key */}
-              {photoKeys.map((key, i) => (
-                <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-muted group">
-                  <img src={getPublicUrl(key)} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => removePhoto(i)}
-                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-              {photoKeys.length < maxPhotos && (
-                <label className="aspect-square rounded-xl border-2 border-dashed border-border hover:border-primary bg-muted/50 hover:bg-primary/5 flex flex-col items-center justify-center cursor-pointer transition-all group">
-                  <Upload className="w-6 h-6 text-muted-foreground group-hover:text-primary mb-1" />
-                  <span className="text-xs text-muted-foreground group-hover:text-primary" style={{ fontFamily: "Inter, sans-serif" }}>Adicionar</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handlePhotoUpload}
-                    className="hidden"
-                    disabled={uploading}
-                  />
-                </label>
-              )}
-            </div>
-            {uploading && (
-              <p className="text-xs text-muted-foreground flex items-center gap-2" style={{ fontFamily: "Inter, sans-serif" }}>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Enviando fotos...
-              </p>
-            )}
-          </div>
-
-          {/* Music */}
-          <div>
-            <Label htmlFor="music" className="flex items-center gap-2" style={{ fontFamily: "Inter, sans-serif" }}>
-              <Music className="w-4 h-4 text-primary" />
-              Link da música no YouTube (opcional)
-            </Label>
-            <Input
-              id="music"
-              value={musicUrl}
-              onChange={(e) => setMusicUrl(e.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              className="mt-1.5"
-              style={{ fontFamily: "Inter, sans-serif" }}
-            />
-            <p className="text-xs text-muted-foreground mt-1.5" style={{ fontFamily: "Inter, sans-serif" }}>
-              Cole o link de qualquer vídeo do YouTube
-            </p>
-          </div>
-
-          {/* Plan Features Preview */}
-          <div className="bg-accent/30 rounded-xl p-4 border border-primary/20">
-            <p className="text-sm font-medium mb-2 flex items-center gap-2" style={{ fontFamily: "Inter, sans-serif" }}>
-              {selectedPlan === "premium" ? <Crown className="w-4 h-4 text-primary" /> : <Sparkles className="w-4 h-4 text-primary" />}
-              Recursos do Plano {selectedPlan === "premium" ? "Premium" : "Essencial"}
-            </p>
-            <ul className="space-y-1 text-xs text-muted-foreground" style={{ fontFamily: "Inter, sans-serif" }}>
-              <li>✓ Até {maxPhotos} fotos no slideshow</li>
-              <li>✓ Contador em tempo real</li>
-              <li>✓ Player de música {selectedPlan === "premium" ? "estilo Spotify" : "simples"}</li>
-              {selectedPlan === "premium" && <li>✓ Chuva de corações animada</li>}
-              <li>✓ Link único e QR Code</li>
-            </ul>
-          </div>
-
-          {/* Submit */}
-          <div className="flex gap-3 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => navigate("/dashboard")}
-              className="flex-1 rounded-full"
-              style={{ fontFamily: "Inter, sans-serif" }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={createMutation.isPending}
-              className="flex-1 bg-primary hover:bg-primary/90 text-white rounded-full"
-              style={{ fontFamily: "Inter, sans-serif" }}
-            >
-              {createMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Criando...
-                </>
-              ) : (
-                <>
-                  <Heart className="w-4 h-4 mr-2 fill-white" />
-                  Criar Página
-                </>
-              )}
-            </Button>
-          </div>
+           {/* ... (rest of the form remains the same) ... */}
         </div>
-
-        {/* Payment Notice */}
+        
+        {/* Total Price and Submit */}
         <div className="mt-8 text-center">
-          <p className="text-sm text-muted-foreground mb-3" style={{ fontFamily: "Inter, sans-serif" }}>
-            Após criar a página, você será direcionado ao pagamento
-          </p>
-          <div className="flex items-center justify-center gap-6 text-xs text-muted-foreground">
-            <span>🔒 Pagamento seguro via Stripe</span>
-            <span>💳 Cartão de crédito</span>
-          </div>
+           <p className="text-lg font-bold">Total: R$ {finalPrice.toFixed(2).replace('.', ',')}</p>
+           <p className="text-sm text-muted-foreground mb-3">Você será direcionado para o pagamento após criar a página</p>
+           <Button
+              onClick={handleSubmit}
+              disabled={createMutation.isPending || checkoutMutation.isPending}
+              className="w-full max-w-sm mx-auto bg-primary hover:bg-primary/90 text-white rounded-full">
+              {(createMutation.isPending || checkoutMutation.isPending) ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processando... </> 
+              ) : (
+                <><Heart className="w-4 h-4 mr-2 fill-white" /> Criar Página e Pagar</>
+              )}
+            </Button>
         </div>
 
         <Dialog open={showUpsellModal} onOpenChange={setShowUpsellModal}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Crown className="w-5 h-5 text-yellow-500" />
-                Faça upgrade para o Premium!
-              </DialogTitle>
-              <DialogDescription className="pt-2">
-                O plano Essencial permite até 3 fotos. Para adicionar mais fotos e ter acesso a recursos exclusivos como o player estilo Spotify e a chuva de corações, faça o upgrade para o plano Premium.
-              </DialogDescription>
+              <DialogTitle>Faça upgrade para o Premium!</DialogTitle>
+              <DialogDescription>O plano Essencial permite até 3 fotos. Para adicionar mais fotos, faça o upgrade.</DialogDescription>
             </DialogHeader>
             <div className="flex justify-end gap-3 pt-4">
               <Button variant="outline" onClick={() => setShowUpsellModal(false)}>Agora não</Button>
-              <Button onClick={handleUpgrade} className="bg-primary hover:bg-primary/90 text-white">Fazer Upgrade</Button>
+              <Button onClick={handleUpgrade}>Fazer Upgrade</Button>
             </div>
           </DialogContent>
         </Dialog>

@@ -9,19 +9,23 @@ export const paymentRouter = router({
   createCheckoutSession: publicProcedure
     .input(createCheckoutSessionSchema)
     .mutation(async ({ input }) => {
-      const session = await createCheckoutSession(input.plan, input.tributeId);
+      // Pass the paymentMethod to the service
+      const session = await createCheckoutSession(input.plan, input.tributeId, input.paymentMethod);
       return session;
     }),
+
   all: adminProcedure.query(async () => {
     const allPayments = await getAllPayments();
     return allPayments;
   }),
+
   refund: adminProcedure
     .input(refundPaymentSchema)
     .mutation(async ({ input }) => {
       const refund = await refundPayment(input.paymentIntentId);
       return refund;
     }),
+  
   getDashboardAnalytics: adminProcedure.query(async () => {
     const payments = await getAllPayments();
     const pages = await getAllTributePages();
@@ -96,3 +100,4 @@ export const paymentRouter = router({
     };
   }),
 });
+
