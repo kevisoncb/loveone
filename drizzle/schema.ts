@@ -32,7 +32,7 @@ export const tributePages = mysqlTable("tribute_pages", {
   relationshipStartDate: timestamp("relationshipStartDate").notNull(),
   
   // Media
-  photoUrls: text("photoUrls").notNull(), // JSON array of S3 URLs
+  photoKeys: text("photoKeys").notNull(), // JSON array of S3 keys
   musicYoutubeUrl: varchar("musicYoutubeUrl", { length: 500 }),
   
   // Plan control

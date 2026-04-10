@@ -10,6 +10,7 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { getPublicUrl } from "../../../server/storage"; // Helper to construct public URL from key
 
 const PRODUCTS = {
   essential: { features: { maxPhotos: 3 } },
@@ -25,11 +26,12 @@ export default function CreatePage() {
   const [partner2Name, setPartner2Name] = useState("");
   const [relationshipDate, setRelationshipDate] = useState("");
   const [musicUrl, setMusicUrl] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photoKeys, setPhotoKeys] = useState<string[]>([]); // Changed from photos (URLs) to photoKeys
   const [uploading, setUploading] = useState(false);
   const [showUpsellModal, setShowUpsellModal] = useState(false);
 
-  const uploadMutation = trpc.tribute.uploadPhoto.useMutation();
+  // NEW: Mutation to get a presigned URL from the backend
+  const presignedUrlMutation = trpc.tribute.createPresignedUrl.useMutation();
   const createMutation = trpc.tribute.create.useMutation({
     onSuccess: (page) => {
       toast.success("Página criada com sucesso!");
@@ -61,37 +63,42 @@ export default function CreatePage() {
 
   const maxPhotos = PRODUCTS[selectedPlan].features.maxPhotos;
 
+  // REWRITTEN: Handles direct-to-S3 uploads
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (selectedPlan === "essential" && photos.length + files.length > maxPhotos) {
-      setShowUpsellModal(true);
-      return;
-    }
-    if (photos.length + files.length > maxPhotos) {
-      toast.error(`Você pode adicionar no máximo ${maxPhotos} fotos no plano ${selectedPlan === "premium" ? "Premium" : "Essencial"}`);
+    if (photoKeys.length + files.length > maxPhotos) {
+      if (selectedPlan === "essential") {
+        setShowUpsellModal(true);
+      } else {
+        toast.error(`Você pode adicionar no máximo ${maxPhotos} fotos no plano Premium.`);
+      }
       return;
     }
 
     setUploading(true);
     try {
-      const urls: string[] = [];
-      for (const file of files) {
-        const reader = new FileReader();
-        const base64 = await new Promise<string>((resolve) => {
-          reader.onload = () => resolve((reader.result as string).split(",")[1]);
-          reader.readAsDataURL(file);
+      const newKeys: string[] = [];
+      await Promise.all(files.map(async (file) => {
+        // 1. Get presigned URL from our server
+        const { uploadUrl, key } = await presignedUrlMutation.mutateAsync({ fileType: file.type });
+
+        // 2. Upload file directly to S3
+        await fetch(uploadUrl, {
+          method: 'PUT',
+          body: file,
+          headers: {
+            'Content-Type': file.type,
+          },
         });
-        const result = await uploadMutation.mutateAsync({
-          fileBase64: base64,
-          fileName: file.name,
-          mimeType: file.type,
-        });
-        urls.push(result.url);
-      }
-      setPhotos([...photos, ...urls]);
-      toast.success(`${files.length} foto(s) enviada(s)`);
-    } catch {
-      toast.error("Erro ao enviar fotos");
+
+        newKeys.push(key);
+      }));
+
+      setPhotoKeys([...photoKeys, ...newKeys]);
+      toast.success(`${files.length} foto(s) enviada(s) com sucesso!`);
+    } catch (error) {
+      console.error("Upload failed:", error);
+      toast.error("Erro ao enviar fotos. Tente novamente.");
     } finally {
       setUploading(false);
     }
@@ -104,15 +111,16 @@ export default function CreatePage() {
   };
 
   const removePhoto = (index: number) => {
-    setPhotos(photos.filter((_, i) => i !== index));
+    setPhotoKeys(photoKeys.filter((_, i) => i !== index));
   };
 
+  // UPDATED: Submits photoKeys instead of URLs
   const handleSubmit = () => {
     if (!partner1Name || !partner2Name || !relationshipDate) {
       toast.error("Preencha todos os campos obrigatórios");
       return;
     }
-    if (photos.length === 0) {
+    if (photoKeys.length === 0) {
       toast.error("Adicione pelo menos 1 foto");
       return;
     }
@@ -120,7 +128,7 @@ export default function CreatePage() {
       partner1Name,
       partner2Name,
       relationshipStartDate: relationshipDate,
-      photoUrls: photos,
+      photoKeys: photoKeys, // Use photoKeys here
       musicYoutubeUrl: musicUrl || undefined,
       planType: selectedPlan,
     });
@@ -238,12 +246,13 @@ export default function CreatePage() {
           <div>
             <Label className="flex items-center gap-2 mb-3" style={{ fontFamily: "Inter, sans-serif" }}>
               <Upload className="w-4 h-4 text-primary" />
-              Fotos do casal ({photos.length}/{maxPhotos})
+              Fotos do casal ({photoKeys.length}/{maxPhotos})
             </Label>
             <div className="grid grid-cols-3 gap-3 mb-3">
-              {photos.map((url, i) => (
+              {/* UPDATED: Displays images directly from S3 using the key */}
+              {photoKeys.map((key, i) => (
                 <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-muted group">
-                  <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
+                  <img src={getPublicUrl(key)} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
                   <button
                     onClick={() => removePhoto(i)}
                     className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -252,7 +261,7 @@ export default function CreatePage() {
                   </button>
                 </div>
               ))}
-              {photos.length < maxPhotos && (
+              {photoKeys.length < maxPhotos && (
                 <label className="aspect-square rounded-xl border-2 border-dashed border-border hover:border-primary bg-muted/50 hover:bg-primary/5 flex flex-col items-center justify-center cursor-pointer transition-all group">
                   <Upload className="w-6 h-6 text-muted-foreground group-hover:text-primary mb-1" />
                   <span className="text-xs text-muted-foreground group-hover:text-primary" style={{ fontFamily: "Inter, sans-serif" }}>Adicionar</span>

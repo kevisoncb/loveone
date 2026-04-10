@@ -16,10 +16,21 @@ import {
   updateTributePage,
   deleteTributePage,
   adminDeleteTributePage,
-  getAllTributePages, // Import this
+  getAllTributePages,
 } from "../../db";
+import { getPresignedUploadUrl } from "../../storage"; // Import the new function
 
 export const tributeRouter = router({
+  // --- Procedure to get a presigned URL for file uploads ---
+  createPresignedUrl: protectedProcedure
+    .input(z.object({ fileType: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user } = ctx;
+      const { fileType } = input;
+      const { uploadUrl, key } = await getPresignedUploadUrl(fileType, user.id);
+      return { uploadUrl, key };
+    }),
+
   create: protectedProcedure
     .input(createTributePageSchema)
     .mutation(async ({ ctx, input }) => {
@@ -54,7 +65,6 @@ export const tributeRouter = router({
       const { user } = ctx;
       const { id, ...data } = input;
 
-      // Allow update if user is admin
       if (user.role !== 'admin') {
         const page = await getTributePageById(id);
         if (page?.userId !== user.id) {

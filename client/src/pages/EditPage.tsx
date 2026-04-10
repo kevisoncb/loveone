@@ -8,6 +8,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { getPublicUrl } from "../../../server/storage";
 
 const PRODUCTS = {
   essential: { features: { maxPhotos: 3 } },
@@ -24,12 +25,12 @@ export default function EditPage() {
   const [partner2Name, setPartner2Name] = useState("");
   const [relationshipDate, setRelationshipDate] = useState("");
   const [musicUrl, setMusicUrl] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photoKeys, setPhotoKeys] = useState<string[]>([]); // Changed from photos to photoKeys
   const [uploading, setUploading] = useState(false);
   const [maxPhotos, setMaxPhotos] = useState(3);
 
   const { data: page, isLoading: pageLoading } = trpc.tribute.getById.useQuery({ id: pageId! }, { enabled: !!pageId });
-  const uploadMutation = trpc.tribute.uploadPhoto.useMutation();
+  const presignedUrlMutation = trpc.tribute.createPresignedUrl.useMutation(); // New mutation
   const updateMutation = trpc.tribute.update.useMutation({
     onSuccess: () => {
       toast.success("Página atualizada com sucesso!");
@@ -44,7 +45,8 @@ export default function EditPage() {
       setPartner2Name(page.partner2Name);
       setRelationshipDate(new Date(page.relationshipStartDate).toISOString().split("T")[0]);
       setMusicUrl(page.musicYoutubeUrl || "");
-      setPhotos(JSON.parse(page.photoUrls || "[]"));
+      // Assumes the backend now sends `photoKeys`
+      setPhotoKeys(JSON.parse(page.photoKeys || "[]")); 
       setMaxPhotos(PRODUCTS[page.planType as keyof typeof PRODUCTS].features.maxPhotos);
     }
   }, [page]);
@@ -75,37 +77,37 @@ export default function EditPage() {
     );
   }
 
+  // REWRITTEN: Handles direct-to-S3 uploads
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (photos.length + files.length > maxPhotos) {
-      toast.error(`Máximo de ${maxPhotos} fotos permitidas`);
+    if (photoKeys.length + files.length > maxPhotos) {
+      toast.error(`Máximo de ${maxPhotos} fotos permitidas.`);
       return;
     }
 
     setUploading(true);
     try {
-      for (const file of files) {
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          const base64 = (ev.target?.result as string).split(",")[1];
-          const result = await uploadMutation.mutateAsync({
-            fileBase64: base64,
-            fileName: file.name,
-            mimeType: file.type,
-          });
-          setPhotos((prev) => [...prev, result.url]);
-        };
-        reader.readAsDataURL(file);
-      }
+      const newKeys: string[] = [];
+      await Promise.all(files.map(async (file) => {
+        const { uploadUrl, key } = await presignedUrlMutation.mutateAsync({ fileType: file.type });
+        await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+        newKeys.push(key);
+      }));
+      setPhotoKeys([...photoKeys, ...newKeys]);
+      toast.success(`${files.length} foto(s) enviada(s)!`);
+    } catch (error) {
+      console.error("Upload failed:", error);
+      toast.error("Erro ao enviar fotos.");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleRemovePhoto = (index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  const removePhoto = (index: number) => {
+    setPhotoKeys(photoKeys.filter((_, i) => i !== index));
   };
 
+  // UPDATED: Submits photoKeys
   const handleSubmit = async () => {
     if (!partner1Name || !partner2Name || !relationshipDate) {
       toast.error("Preencha todos os campos obrigatórios");
@@ -117,7 +119,7 @@ export default function EditPage() {
       partner1Name,
       partner2Name,
       relationshipStartDate: relationshipDate,
-      photoUrls: photos,
+      photoKeys: photoKeys, // Use photoKeys
       musicYoutubeUrl: musicUrl || null,
     });
   };
@@ -149,7 +151,7 @@ export default function EditPage() {
         </motion.div>
 
         <div className="space-y-8">
-          {/* Nomes */}
+          {/* Names */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="bg-card rounded-2xl border border-border p-6">
             <Label className="text-lg font-semibold mb-4 block" style={{ fontFamily: "Cormorant Garamond, serif" }}>
               Os Nomes do Casal
@@ -176,7 +178,7 @@ export default function EditPage() {
             </div>
           </motion.div>
 
-          {/* Data */}
+          {/* Date */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="bg-card rounded-2xl border border-border p-6">
             <Label className="text-lg font-semibold mb-4 flex items-center gap-2" style={{ fontFamily: "Cormorant Garamond, serif" }}>
               <Calendar className="w-5 h-5 text-primary" />
@@ -191,11 +193,11 @@ export default function EditPage() {
             />
           </motion.div>
 
-          {/* Fotos */}
+          {/* Photos */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="bg-card rounded-2xl border border-border p-6">
             <Label className="text-lg font-semibold mb-4 flex items-center gap-2" style={{ fontFamily: "Cormorant Garamond, serif" }}>
               <Upload className="w-5 h-5 text-primary" />
-              Fotos ({photos.length}/{maxPhotos})
+              Fotos ({photoKeys.length}/{maxPhotos})
             </Label>
             <div className="mb-6">
               <label className="flex items-center justify-center w-full p-6 border-2 border-dashed border-primary/30 rounded-xl cursor-pointer hover:border-primary/60 transition-colors">
@@ -204,7 +206,7 @@ export default function EditPage() {
                   multiple
                   accept="image/*"
                   onChange={handlePhotoUpload}
-                  disabled={photos.length >= maxPhotos || uploading}
+                  disabled={photoKeys.length >= maxPhotos || uploading}
                   className="hidden"
                 />
                 <div className="text-center">
@@ -217,11 +219,12 @@ export default function EditPage() {
             </div>
             {uploading && <p className="text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</p>}
             <div className="grid grid-cols-3 gap-4">
-              {photos.map((url, i) => (
+              {/* UPDATED: Displays images from S3 */}
+              {photoKeys.map((key, i) => (
                 <div key={i} className="relative group rounded-xl overflow-hidden">
-                  <img src={url} alt={`Foto ${i + 1}`} className="w-full h-24 object-cover" />
+                  <img src={getPublicUrl(key)} alt={`Foto ${i + 1}`} className="w-full h-24 object-cover" />
                   <button
-                    onClick={() => handleRemovePhoto(i)}
+                    onClick={() => removePhoto(i)}
                     className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X className="w-5 h-5 text-white" />
@@ -231,7 +234,7 @@ export default function EditPage() {
             </div>
           </motion.div>
 
-          {/* Música */}
+          {/* Music */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="bg-card rounded-2xl border border-border p-6">
             <Label className="text-lg font-semibold mb-4 flex items-center gap-2" style={{ fontFamily: "Cormorant Garamond, serif" }}>
               <Music className="w-5 h-5 text-primary" />
