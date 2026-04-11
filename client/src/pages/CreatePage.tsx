@@ -1,7 +1,6 @@
 
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { Heart, Upload, X, Music, Calendar, Crown, Sparkles, ArrowLeft, Loader2, CreditCard, Banknote } from "lucide-react"; // Added new icons
+import { ArrowLeft, Heart, Loader2, CreditCard, Banknote, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,8 +9,7 @@ import { getLoginUrl } from "@/const";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { getPublicUrl } from "../../../server/storage";
+import { TributePreview } from "@/components/TributePreview"; // Import the new preview component
 
 const PRODUCTS = {
   essential: { basePrice: 29.90, features: { maxPhotos: 3 } },
@@ -19,235 +17,176 @@ const PRODUCTS = {
 } as const;
 
 export default function CreatePage() {
+  // --- STATES --- 
   const { isAuthenticated, loading } = useAuth();
   const [, navigate] = useLocation();
-  const [step, setStep] = useState(1);
+  
+  // Form States
   const [selectedPlan, setSelectedPlan] = useState<"essential" | "premium">("essential");
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card'); // New state for payment method
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'pix'>('card');
   const [partner1Name, setPartner1Name] = useState("");
   const [partner2Name, setPartner2Name] = useState("");
   const [relationshipDate, setRelationshipDate] = useState("");
   const [musicUrl, setMusicUrl] = useState("");
-  const [photoKeys, setPhotoKeys] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<string[]>([]); // URLs for preview
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]); // Files for upload
+
+  // UI States
   const [uploading, setUploading] = useState(false);
-  const [showUpsellModal, setShowUpsellModal] = useState(false);
+  
+  // --- TRPC MUTATIONS --- 
+  const createPageMutation = trpc.tribute.create.useMutation();
+  const checkoutMutation = trpc.payment.createCheckoutSession.useMutation();
 
-  const presignedUrlMutation = trpc.tribute.createPresignedUrl.useMutation();
-  const createMutation = trpc.tribute.create.useMutation({
-    onSuccess: (page) => {
-      toast.success("Página criada com sucesso! Redirecionando para o pagamento...");
-      // Now, redirect to payment
-      handlePaymentRedirect(page.id);
-    },
-    onError: () => toast.error("Erro ao criar página"),
-  });
-
-  // New mutation for creating checkout session
-  const checkoutMutation = trpc.payment.createCheckoutSession.useMutation({
-    onSuccess: (session) => {
-      if (session.url) {
-        window.location.href = session.url;
-      }
-    },
-    onError: () => toast.error("Erro ao criar sessão de pagamento."),
-  });
-
+  // --- EFFECTS --- 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const plan = params.get("plan");
-    if (plan === "premium" || plan === "essential") {
-      setSelectedPlan(plan);
-    }
+    if (plan === "premium" || plan === "essential") setSelectedPlan(plan);
   }, []);
 
+  // --- AUTHENTICATION --- 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Heart className="w-8 h-8 text-primary fill-primary animate-pulse" />
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
   }
-
   if (!isAuthenticated) {
     window.location.href = getLoginUrl();
     return null;
   }
 
+  // --- DERIVED VALUES --- 
   const maxPhotos = PRODUCTS[selectedPlan].features.maxPhotos;
   const basePrice = PRODUCTS[selectedPlan].basePrice;
   const finalPrice = paymentMethod === 'pix' ? basePrice * 0.9 : basePrice;
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- HANDLERS --- 
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (photoKeys.length + files.length > maxPhotos) {
-      if (selectedPlan === "essential") {
-        setShowUpsellModal(true);
-      } else {
-        toast.error(`Você pode adicionar no máximo ${maxPhotos} fotos no plano Premium.`);
-      }
+    if (photos.length + files.length > maxPhotos) {
+      toast.error(`Limite de ${maxPhotos} fotos atingido.`);
       return;
     }
-
-    setUploading(true);
-    try {
-      const newKeys: string[] = [];
-      await Promise.all(files.map(async (file) => {
-        const { uploadUrl, key } = await presignedUrlMutation.mutateAsync({ fileType: file.type });
-        await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-        newKeys.push(key);
-      }));
-      setPhotoKeys([...photoKeys, ...newKeys]);
-      toast.success(`${files.length} foto(s) enviada(s) com sucesso!`);
-    } catch (error) {
-      toast.error("Erro ao enviar fotos. Tente novamente.");
-    } finally {
-      setUploading(false);
-    }
+    setPhotoFiles(prev => [...prev, ...files]);
+    const newPhotoUrls = files.map(file => URL.createObjectURL(file));
+    setPhotos(prev => [...prev, ...newPhotoUrls]);
   };
 
-  const handleUpgrade = () => {
-    setSelectedPlan("premium");
-    setShowUpsellModal(false);
-    toast.success("Plano atualizado para Premium!");
-  };
-
-  const removePhoto = (index: number) => {
-    setPhotoKeys(photoKeys.filter((_, i) => i !== index));
-  };
-
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!partner1Name || !partner2Name || !relationshipDate) {
-      toast.error("Preencha todos os campos obrigatórios");
-      return;
+      return toast.error("Preencha os nomes e a data.");
     }
-    if (photoKeys.length === 0) {
-      toast.error("Adicione pelo menos 1 foto");
-      return;
+
+    try {
+      // 1. Create the page entry in the database
+      const page = await createPageMutation.mutateAsync({
+        partner1Name,
+        partner2Name,
+        relationshipStartDate: relationshipDate,
+        musicYoutubeUrl: musicUrl || undefined,
+        planType: selectedPlan,
+        photoKeys: [], // Will be updated after upload
+      });
+
+      // 2. Create a checkout session
+      const session = await checkoutMutation.mutateAsync({
+        plan: selectedPlan,
+        tributeId: page.id,
+        paymentMethod: paymentMethod,
+      });
+
+      // 3. Redirect to Stripe
+      if (session.url) {
+        window.location.href = session.url;
+      } else {
+        toast.error("Não foi possível iniciar o pagamento.");
+      }
+    } catch (error) {
+      toast.error("Ocorreu um erro. Tente novamente.");
     }
-    createMutation.mutate({
-      partner1Name,
-      partner2Name,
-      relationshipStartDate: relationshipDate,
-      photoKeys: photoKeys,
-      musicYoutubeUrl: musicUrl || undefined,
-      planType: selectedPlan,
-    });
   };
 
-  const handlePaymentRedirect = (tributeId: number) => {
-    checkoutMutation.mutate({
-      plan: selectedPlan,
-      tributeId: tributeId,
-      paymentMethod: paymentMethod,
-    });
-  };
-
+  // --- RENDER --- 
   return (
     <div className="min-h-screen bg-background">
-      <nav className="sticky top-0 z-50 glass border-b border-white/30">
+      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-sm border-b">
         <div className="container flex items-center justify-between h-16">
-          <button onClick={() => navigate("/dashboard")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-            <span>Voltar</span>
-          </button>
-          <div className="flex items-center gap-2">
-            <Heart className="w-6 h-6 text-primary fill-primary" />
-            <span className="text-xl font-bold text-gradient-rose">Love365</span>
-          </div>
-          <div className="w-20" />
+            <Button variant="ghost" onClick={() => navigate("/dashboard")} className="flex items-center gap-2">
+              <ArrowLeft className="w-4 h-4" /> Voltar
+            </Button>
+            <h1 className="font-semibold text-lg">Crie sua Homenagem</h1>
+            <div className="w-20" />
         </div>
       </nav>
 
-      <div className="container max-w-2xl py-10">
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-bold text-foreground">Crie sua página de homenagem</h1>
-          <p className="text-muted-foreground">Preencha os dados e personalize sua página</p>
-        </div>
-
-        {/* Plan Selector */}
-        <div className="mb-10">
-          <Label className="text-sm font-medium mb-3 block">Escolha o plano</Label>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <button
-              onClick={() => setSelectedPlan("essential")}
-              className={`p-5 rounded-2xl border-2 transition-all text-left ${selectedPlan === "essential" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
-              <h3>Essencial</h3>
-              <p>R$ {PRODUCTS.essential.basePrice.toFixed(2).replace('.', ',')}<span className="text-sm font-normal text-muted-foreground">/ano</span></p>
-              <p className="text-xs text-muted-foreground">3 fotos • Player simples</p>
-            </button>
-            <button
-              onClick={() => setSelectedPlan("premium")}
-              className={`p-5 rounded-2xl border-2 transition-all text-left relative overflow-hidden ${selectedPlan === "premium" ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
-               <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                <Crown className="w-2.5 h-2.5" />Popular
-              </div>
-              <h3>Premium</h3>
-              <p>R$ {PRODUCTS.premium.basePrice.toFixed(2).replace('.', ',')}<span className="text-sm font-normal text-muted-foreground">/vitalício</span></p>
-              <p className="text-xs text-muted-foreground">5 fotos • Spotify • Corações</p>
-            </button>
-          </div>
-        </div>
-
-        {/* Payment Method Selector */}
-        <div className="mb-10">
-          <Label className="text-sm font-medium mb-3 block">Escolha o método de pagamento</Label>
-          <div className="grid sm:grid-cols-2 gap-4">
-              <button
-                onClick={() => setPaymentMethod('card')}
-                className={`p-5 rounded-2xl border-2 transition-all text-left flex items-center gap-4 ${paymentMethod === 'card' ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
-                 <CreditCard className={`w-6 h-6 ${paymentMethod === 'card' ? 'text-primary' : 'text-muted-foreground'}`} />
-                 <div>
-                    <h3 className="font-bold">Cartão de Crédito</h3>
-                    <p className="text-xs text-muted-foreground">Pagamento seguro</p>
-                 </div>
-              </button>
-               <button
-                onClick={() => setPaymentMethod('pix')}
-                className={`p-5 rounded-2xl border-2 transition-all text-left flex items-center gap-4 relative ${paymentMethod === 'pix' ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/50"}`}>
-                <div className="absolute top-2 right-2 bg-green-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">10% OFF</div>
-                <Banknote className={`w-6 h-6 ${paymentMethod === 'pix' ? 'text-primary' : 'text-muted-foreground'}`} />
-                 <div>
-                    <h3 className="font-bold">Pix</h3>
-                    <p className="text-xs text-muted-foreground">Aprovação imediata</p>
-                 </div>
-              </button>
-          </div>
-        </div>
-
-        {/* Form */}
-        <div className="bg-card rounded-2xl border border-border p-8 space-y-6">
-           {/* ... (rest of the form remains the same) ... */}
-        </div>
-        
-        {/* Total Price and Submit */}
-        <div className="mt-8 text-center">
-           <p className="text-lg font-bold">Total: R$ {finalPrice.toFixed(2).replace('.', ',')}</p>
-           <p className="text-sm text-muted-foreground mb-3">Você será direcionado para o pagamento após criar a página</p>
-           <Button
-              onClick={handleSubmit}
-              disabled={createMutation.isPending || checkoutMutation.isPending}
-              className="w-full max-w-sm mx-auto bg-primary hover:bg-primary/90 text-white rounded-full">
-              {(createMutation.isPending || checkoutMutation.isPending) ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processando... </> 
-              ) : (
-                <><Heart className="w-4 h-4 mr-2 fill-white" /> Criar Página e Pagar</>
-              )}
-            </Button>
-        </div>
-
-        <Dialog open={showUpsellModal} onOpenChange={setShowUpsellModal}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Faça upgrade para o Premium!</DialogTitle>
-              <DialogDescription>O plano Essencial permite até 3 fotos. Para adicionar mais fotos, faça o upgrade.</DialogDescription>
-            </DialogHeader>
-            <div className="flex justify-end gap-3 pt-4">
-              <Button variant="outline" onClick={() => setShowUpsellModal(false)}>Agora não</Button>
-              <Button onClick={handleUpgrade}>Fazer Upgrade</Button>
+      <div className="container py-10 grid grid-cols-1 lg:grid-cols-2 gap-12">
+        {/* LEFT - FORM */}
+        <div className="space-y-8">
+          <div>
+            <Label>Nomes do Casal</Label>
+            <div className="grid grid-cols-2 gap-4 mt-2">
+              <Input placeholder="Nome 1" value={partner1Name} onChange={e => setPartner1Name(e.target.value)} />
+              <Input placeholder="Nome 2" value={partner2Name} onChange={e => setPartner2Name(e.target.value)} />
             </div>
-          </DialogContent>
-        </Dialog>
+          </div>
+          <div>
+            <Label>Data de Início do Relacionamento</Label>
+            <Input type="date" value={relationshipDate} onChange={e => setRelationshipDate(e.target.value)} className="mt-2" />
+          </div>
+          <div>
+             <Label>Fotos ({photos.length}/{maxPhotos})</Label>
+             <Input type="file" accept="image/*" multiple onChange={handlePhotoChange} className="mt-2" />
+          </div>
+           <div>
+            <Label>Música (Link do YouTube)</Label>
+            <Input placeholder="https://youtube.com/watch?v=..." value={musicUrl} onChange={e => setMusicUrl(e.target.value)} className="mt-2" />
+          </div>
 
+          <hr className="my-8"/>
+
+          {/* Payment Section */}
+          <div>
+             <h2 class="text-xl font-bold mb-4">Plano e Pagamento</h2>
+             {/* Plan Selector */}
+             <div className="grid grid-cols-2 gap-4 mb-4">
+                 <Button onClick={() => setSelectedPlan("essential")} variant={selectedPlan === 'essential' ? 'default' : 'outline'}>Essencial</Button>
+                 <Button onClick={() => setSelectedPlan("premium")} variant={selectedPlan === 'premium' ? 'default' : 'outline'}>Premium</Button>
+             </div>
+             {/* Payment Method Selector */}
+             <div className="grid grid-cols-2 gap-4">
+                 <Button onClick={() => setPaymentMethod('card')} variant={paymentMethod === 'card' ? 'secondary' : 'outline'} className="h-auto py-3">
+                     <CreditCard className="w-5 h-5 mr-2"/>
+                     <div>
+                         <p>Cartão de Crédito</p>
+                         <p className="text-xs text-muted-foreground">R$ {PRODUCTS[selectedPlan].basePrice.toFixed(2)}</p>
+                     </div>
+                 </Button>
+                 <Button onClick={() => setPaymentMethod('pix')} variant={paymentMethod === 'pix' ? 'secondary' : 'outline'} className="h-auto py-3">
+                     <Banknote className="w-5 h-5 mr-2"/>
+                     <div>
+                         <p>Pix <span className="text-green-500 font-bold">10% OFF</span></p>
+                         <p className="text-xs text-muted-foreground">R$ {(PRODUCTS[selectedPlan].basePrice * 0.9).toFixed(2)}</p>
+                     </div>
+                 </Button>
+             </div>
+          </div>
+
+          <Button onClick={handleSubmit} size="lg" className="w-full">
+            <Heart className="w-4 h-4 mr-2"/>
+            Criar e Pagar R$ {finalPrice.toFixed(2)}
+          </Button>
+        </div>
+
+        {/* RIGHT - PREVIEW */}
+        <div className="sticky top-24 h-[700px]">
+           <TributePreview 
+              partner1Name={partner1Name}
+              partner2Name={partner2Name}
+              relationshipDate={relationshipDate}
+              photos={photos}
+              music={musicUrl}
+              plan={selectedPlan}
+            />
+        </div>
       </div>
     </div>
   );

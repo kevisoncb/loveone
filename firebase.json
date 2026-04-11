@@ -1,24 +1,11 @@
 {
   "hosting": {
-    "public": "dist/client",
+    "site": "love365",
+    "source": ".",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "function": "api"
-      },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
     ]
-  },
-  "functions": {
-    "source": "dist/server",
-    "runtime": "nodejs18"
   }
 }
