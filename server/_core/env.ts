@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
   cookieSecret: process.env.JWT_SECRET ?? "",
@@ -11,4 +14,7 @@ export const ENV = {
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   publicUrl: process.env.PUBLIC_URL ?? "",
+  // AWS S3 Configuration
+  S3_BUCKET_NAME: process.env.AWS_BUCKET_NAME ?? "",
+  S3_REGION: process.env.AWS_BUCKET_REGION ?? "",
 };
